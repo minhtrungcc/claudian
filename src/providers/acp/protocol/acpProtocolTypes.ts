@@ -135,6 +135,12 @@ export interface AcpToolResultParams {
   isError?: boolean;
 }
 
+export interface AcpToolOutputDeltaParams {
+  messageId: string;
+  toolUseId: string;
+  delta: string;
+}
+
 export interface AcpMessageStopParams {
   messageId: string;
 }
@@ -142,6 +148,17 @@ export interface AcpMessageStopParams {
 export interface AcpErrorParams {
   messageId: string;
   error: string;
+}
+
+export interface AcpToolExecutionStartedParams {
+  messageId: string;
+  toolUseId: string;
+}
+
+export interface AcpToolExecutionCompletedParams {
+  messageId: string;
+  toolUseId: string;
+  status: 'success' | 'error' | 'timeout';
 }
 
 // ---------------------------------------------------------------------------

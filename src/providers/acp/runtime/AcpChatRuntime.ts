@@ -402,6 +402,9 @@ export class AcpChatRuntime implements ChatRuntime {
     const methods = [
       'chat/textDelta',
       'chat/toolUseStart',
+      'chat/toolExecutionStarted',
+      'chat/toolOutputDelta',
+      'chat/toolExecutionCompleted',
       'chat/toolResult',
       'chat/messageStop',
       'chat/error',
