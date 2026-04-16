@@ -19,7 +19,12 @@ import type { ChatMessage, Conversation, SlashCommand, StreamChunk } from '../..
 import type ClaudianPlugin from '../../../main';
 import { getAcpProviderSettings, type AcpAgentConfig } from '../settings';
 import { ACP_PROVIDER_CAPABILITIES } from '../capabilities';
-import type { AcpChatParams, AcpInitializeResult, AcpMessage, AcpServerCapabilities } from '../protocol/acpProtocolTypes';
+import type {
+  AcpChatParams,
+  AcpInitializeResult,
+  AcpMessage,
+  AcpServerCapabilities,
+} from '../protocol/acpProtocolTypes';
 import type { AcpProcessConfig } from '../transport/AcpProcessManager';
 import { AcpProcessManager } from '../transport/AcpProcessManager';
 import { AcpNotificationRouter } from './AcpNotificationRouter';
@@ -36,6 +41,26 @@ interface ActiveAgentInfo {
   capabilities: AcpServerCapabilities;
 }
 
+/**
+ * ACP provider state stored in Conversation.providerState.
+ */
+interface AcpProviderState {
+  sessionId: string | null;
+  agentId?: string;
+  agentName?: string;
+  messageHistory?: AcpMessage[];
+}
+
+/**
+ * ACP conversation tracking for context and resumption.
+ */
+interface AcpConversationState {
+  sessionId: string | null;
+  messageHistory: AcpMessage[];
+  lastMessageId: string | null;
+  currentAgentId: string | null;
+}
+
 export class AcpChatRuntime implements ChatRuntime {
   readonly providerId: ProviderId = 'acp';
 
@@ -46,10 +71,17 @@ export class AcpChatRuntime implements ChatRuntime {
   private serverRequestRouter = new AcpServerRequestRouter();
   private ready = false;
   private readyListeners = new Set<(ready: boolean) => void>();
-  private sessionId: string | null = null;
 
   // Active agent info (detected on handshake)
   private activeAgentInfo: ActiveAgentInfo | null = null;
+
+  // Conversation state for session tracking
+  private conversationState: AcpConversationState = {
+    sessionId: null,
+    messageHistory: [],
+    lastMessageId: null,
+    currentAgentId: null,
+  };
 
   // Chunk buffering for streaming
   private chunkBuffer: StreamChunk[] = [];
@@ -115,12 +147,28 @@ export class AcpChatRuntime implements ChatRuntime {
   }
 
   setResumeCheckpoint(_checkpointId: string | undefined): void {
-    // ACP doesn't support resume checkpoints in MVP
+    // ACP doesn't support resume checkpoints - conversations are resumed via history
   }
 
-  syncConversationState(_conversation: ChatRuntimeConversationState | null): void {
-    // ACP doesn't persist conversation state in MVP
-    this.sessionId = null;
+  syncConversationState(conversation: ChatRuntimeConversationState | null): void {
+    if (!conversation) {
+      this.conversationState = {
+        sessionId: null,
+        messageHistory: [],
+        lastMessageId: null,
+        currentAgentId: null,
+      };
+      return;
+    }
+
+    // Restore conversation state from providerState
+    const state = conversation.providerState as AcpProviderState | undefined;
+    this.conversationState = {
+      sessionId: state?.sessionId ?? null,
+      messageHistory: state?.messageHistory ?? [],
+      lastMessageId: null,
+      currentAgentId: state?.agentId ?? null,
+    };
   }
 
   async reloadMcpServers(): Promise<void> {
@@ -164,10 +212,19 @@ export class AcpChatRuntime implements ChatRuntime {
       return;
     }
 
+    // Ensure we have a session ID
+    if (!this.conversationState.sessionId) {
+      this.conversationState.sessionId = this.generateSessionId();
+    }
+
     this.canceled = false;
     this.chunkBuffer = [];
     this.chunkResolve = null;
     this.currentMessageId = null;
+
+    // Track accumulated response for conversation history
+    let accumulatedResponse = '';
+    let userMessageContent = turn.prompt;
 
     const enqueueChunk = (chunk: StreamChunk): void => {
       this.chunkBuffer.push(chunk);
@@ -177,7 +234,7 @@ export class AcpChatRuntime implements ChatRuntime {
       }
     };
 
-    // Set up notification router
+    // Set up notification router with response tracking
     this.notificationRouter = new AcpNotificationRouter(enqueueChunk);
     this.wireTransportHandlers();
 
@@ -189,6 +246,12 @@ export class AcpChatRuntime implements ChatRuntime {
       const result = await this.transport.request<{ messageId: string }>('chat/send', acpRequest);
       this.currentMessageId = result.messageId;
       this.recordTurnMetadata({ userMessageId: result.messageId, wasSent: true });
+
+      // Add user message to history
+      this.conversationState.messageHistory.push({
+        role: 'user',
+        content: userMessageContent,
+      });
 
       // Yield chunks until done or canceled
       while (true) {
@@ -215,8 +278,21 @@ export class AcpChatRuntime implements ChatRuntime {
 
         while (this.chunkBuffer.length > 0) {
           const chunk = this.chunkBuffer.shift()!;
+
+          // Track text for conversation history
+          if (chunk.type === 'text') {
+            accumulatedResponse += chunk.content;
+          }
+
           yield chunk;
           if (chunk.type === 'done') {
+            // Add assistant response to history
+            if (accumulatedResponse) {
+              this.conversationState.messageHistory.push({
+                role: 'assistant',
+                content: accumulatedResponse,
+              });
+            }
             return;
           }
         }
@@ -247,11 +323,13 @@ export class AcpChatRuntime implements ChatRuntime {
   }
 
   resetSession(): void {
-    this.sessionId = null;
+    this.conversationState.sessionId = null;
+    this.conversationState.messageHistory = [];
+    this.conversationState.lastMessageId = null;
   }
 
   getSessionId(): string | null {
-    return this.sessionId;
+    return this.conversationState.sessionId;
   }
 
   consumeSessionInvalidation(): boolean {
@@ -310,22 +388,23 @@ export class AcpChatRuntime implements ChatRuntime {
     conversation: Conversation | null;
     sessionInvalidated: boolean;
   }): SessionUpdateResult {
-    const sessionId = this.sessionId;
+    const sessionId = this.conversationState.sessionId;
 
-    // Include active agent info in provider state
-    const providerState: Record<string, unknown> = {};
-    if (sessionId) {
-      providerState.sessionId = sessionId;
-    }
+    // Build provider state with session and history
+    const providerState: AcpProviderState = {
+      sessionId,
+      messageHistory: this.conversationState.messageHistory,
+    };
+
+    // Include active agent info
     if (this.activeAgentInfo) {
       providerState.agentId = this.activeAgentInfo.id;
       providerState.agentName = this.activeAgentInfo.name;
-      providerState.agentCapabilities = this.activeAgentInfo.capabilities;
     }
 
     const updates: Partial<Conversation> = {
       sessionId,
-      providerState: Object.keys(providerState).length > 0 ? providerState : undefined,
+      providerState: Object.keys(providerState).length > 0 ? (providerState as unknown as Record<string, unknown>) : undefined,
     };
 
     if (params.sessionInvalidated && params.conversation) {
@@ -337,12 +416,16 @@ export class AcpChatRuntime implements ChatRuntime {
   }
 
   resolveSessionIdForFork(conversation: Conversation | null): string | null {
-    return this.sessionId ?? conversation?.sessionId ?? null;
+    return this.conversationState.sessionId ?? conversation?.sessionId ?? null;
   }
 
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------
+
+  private generateSessionId(): string {
+    return `acp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
 
   private getActiveAgentConfig(settings: ReturnType<typeof getAcpProviderSettings>): AcpAgentConfig | null {
     const defaultAgent = settings.agents.find(a => a.id === settings.defaultAgentId);
@@ -472,9 +555,11 @@ export class AcpChatRuntime implements ChatRuntime {
   }
 
   private buildAcpChatRequest(turn: PreparedChatTurn): AcpChatParams {
-    const messages: AcpMessage[] = [
-      { role: 'user', content: turn.prompt },
-    ];
+    // Build message history for context
+    const messages: AcpMessage[] = [...this.conversationState.messageHistory];
+
+    // Add current user message
+    messages.push({ role: 'user', content: turn.prompt });
 
     return {
       messages,
