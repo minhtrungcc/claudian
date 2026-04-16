@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 
-export interface AcpAgentConfig {
+export interface AcpProcessConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
@@ -16,11 +16,15 @@ export class AcpProcessManager {
   private exitPromise: Promise<void> | null = null;
   private exitResolve: (() => void) | null = null;
 
-  constructor(private readonly config: AcpAgentConfig) {}
+  constructor(private readonly config: AcpProcessConfig) {}
 
   start(): void {
     if (this.proc) {
       throw new Error('ACP agent process already started');
+    }
+
+    if (!this.config.command) {
+      throw new Error('ACP agent command is required');
     }
 
     this.proc = spawn(this.config.command, this.config.args ?? [], {

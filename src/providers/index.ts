@@ -4,6 +4,7 @@ import { claudeWorkspaceRegistration } from './claude/app/ClaudeWorkspaceService
 import { claudeProviderRegistration } from './claude/registration';
 import { codexWorkspaceRegistration } from './codex/app/CodexWorkspaceServices';
 import { codexProviderRegistration } from './codex/registration';
+import { acpWorkspaceRegistration } from './acp/app/AcpWorkspaceServices';
 import { acpProviderRegistration } from './acp/registration';
 
 let builtInProvidersRegistered = false;
@@ -18,6 +19,7 @@ export function registerBuiltInProviders(): void {
   ProviderRegistry.register('acp', acpProviderRegistration);
   ProviderWorkspaceRegistry.register('claude', claudeWorkspaceRegistration);
   ProviderWorkspaceRegistry.register('codex', codexWorkspaceRegistration);
+  ProviderWorkspaceRegistry.register('acp', acpWorkspaceRegistration);
   builtInProvidersRegistered = true;
 }
 

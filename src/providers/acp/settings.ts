@@ -7,7 +7,7 @@ export interface AcpAgentConfig {
   name: string;
   transportType: AcpTransportType;
   // For stdio
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
   // For http/websocket (future use)

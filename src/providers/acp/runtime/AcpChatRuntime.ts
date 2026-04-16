@@ -19,12 +19,20 @@ import type { ChatMessage, Conversation, SlashCommand, StreamChunk } from '../..
 import type ClaudianPlugin from '../../../main';
 import { getAcpProviderSettings, type AcpAgentConfig } from '../settings';
 import { ACP_PROVIDER_CAPABILITIES } from '../capabilities';
-import type { AcpChatParams, AcpInitializeResult, AcpMessage } from '../protocol/acpProtocolTypes';
+import type { AcpChatParams, AcpInitializeResult, AcpMessage, AcpServerCapabilities } from '../protocol/acpProtocolTypes';
+import type { AcpProcessConfig } from '../transport/AcpProcessManager';
 import { AcpProcessManager } from '../transport/AcpProcessManager';
 import { AcpNotificationRouter } from './AcpNotificationRouter';
 import { AcpServerRequestRouter } from './AcpServerRequestRouter';
 import { AcpStdioTransport } from '../transport/AcpStdioTransport';
 import type { AcpTransport } from '../transport/AcpTransport';
+
+interface ActiveAgentInfo {
+  id: string;
+  name: string;
+  serverInfo: { name: string; version: string };
+  capabilities: AcpServerCapabilities;
+}
 
 export class AcpChatRuntime implements ChatRuntime {
   readonly providerId: ProviderId = 'acp';
@@ -37,6 +45,9 @@ export class AcpChatRuntime implements ChatRuntime {
   private ready = false;
   private readyListeners = new Set<(ready: boolean) => void>();
   private sessionId: string | null = null;
+
+  // Active agent info (detected on handshake)
+  private activeAgentInfo: ActiveAgentInfo | null = null;
 
   // Chunk buffering for streaming
   private chunkBuffer: StreamChunk[] = [];
@@ -61,7 +72,20 @@ export class AcpChatRuntime implements ChatRuntime {
   }
 
   getCapabilities(): Readonly<ProviderCapabilities> {
+    // Return dynamic capabilities based on active agent
+    if (this.activeAgentInfo?.capabilities) {
+      const caps = this.activeAgentInfo.capabilities;
+      return {
+        ...ACP_PROVIDER_CAPABILITIES,
+        supportsImageAttachments: caps.streaming ?? false,
+      };
+    }
     return ACP_PROVIDER_CAPABILITIES;
+  }
+
+  /** Get info about the currently active agent. */
+  getActiveAgentInfo(): ActiveAgentInfo | null {
+    return this.activeAgentInfo;
   }
 
   prepareTurn(request: ChatTurnRequest): PreparedChatTurn {
@@ -286,9 +310,20 @@ export class AcpChatRuntime implements ChatRuntime {
   }): SessionUpdateResult {
     const sessionId = this.sessionId;
 
+    // Include active agent info in provider state
+    const providerState: Record<string, unknown> = {};
+    if (sessionId) {
+      providerState.sessionId = sessionId;
+    }
+    if (this.activeAgentInfo) {
+      providerState.agentId = this.activeAgentInfo.id;
+      providerState.agentName = this.activeAgentInfo.name;
+      providerState.agentCapabilities = this.activeAgentInfo.capabilities;
+    }
+
     const updates: Partial<Conversation> = {
       sessionId,
-      providerState: sessionId ? { sessionId } : undefined,
+      providerState: Object.keys(providerState).length > 0 ? providerState : undefined,
     };
 
     if (params.sessionInvalidated && params.conversation) {
@@ -321,7 +356,19 @@ export class AcpChatRuntime implements ChatRuntime {
   private async startAgent(agentConfig: AcpAgentConfig): Promise<void> {
     this.shutdownTransport().catch(() => {});
 
-    this.processManager = new AcpProcessManager(agentConfig);
+    // Validate stdio transport requirements
+    if (agentConfig.transportType === 'stdio' && !agentConfig.command) {
+      throw new Error(`ACP agent "${agentConfig.name}" has no command configured`);
+    }
+
+    // Convert to process config (only stdio uses process manager in MVP)
+    const processConfig: AcpProcessConfig = {
+      command: agentConfig.command ?? '',
+      args: agentConfig.args,
+      env: agentConfig.env,
+    };
+
+    this.processManager = new AcpProcessManager(processConfig);
     this.processManager.start();
 
     this.transport = new AcpStdioTransport(
@@ -334,12 +381,16 @@ export class AcpChatRuntime implements ChatRuntime {
     // Initialize handshake
     const initResult = await this.transport.request<AcpInitializeResult>('initialize', {
       clientInfo: { name: 'claudian', version: '1.0.0' },
-      capabilities: { chat: true, streaming: true },
+      capabilities: { chat: true, streaming: true, tools: true },
     });
 
-    if (initResult.capabilities.chat) {
-      // Chat is supported
-    }
+    // Store agent info for capability detection
+    this.activeAgentInfo = {
+      id: agentConfig.id,
+      name: agentConfig.name,
+      serverInfo: initResult.serverInfo,
+      capabilities: initResult.capabilities,
+    };
   }
 
   private async shutdownTransport(): Promise<void> {
