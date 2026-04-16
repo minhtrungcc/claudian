@@ -25,6 +25,8 @@ import { AcpProcessManager } from '../transport/AcpProcessManager';
 import { AcpNotificationRouter } from './AcpNotificationRouter';
 import { AcpServerRequestRouter } from './AcpServerRequestRouter';
 import { AcpStdioTransport } from '../transport/AcpStdioTransport';
+import { AcpHttpTransport } from '../transport/AcpHttpTransport';
+import { AcpWebSocketTransport } from '../transport/AcpWebSocketTransport';
 import type { AcpTransport } from '../transport/AcpTransport';
 
 interface ActiveAgentInfo {
@@ -356,27 +358,61 @@ export class AcpChatRuntime implements ChatRuntime {
   private async startAgent(agentConfig: AcpAgentConfig): Promise<void> {
     this.shutdownTransport().catch(() => {});
 
-    // Validate stdio transport requirements
-    if (agentConfig.transportType === 'stdio' && !agentConfig.command) {
-      throw new Error(`ACP agent "${agentConfig.name}" has no command configured`);
+    // Initialize transport based on type
+    switch (agentConfig.transportType) {
+      case 'stdio': {
+        if (!agentConfig.command) {
+          throw new Error(`ACP agent "${agentConfig.name}" has no command configured`);
+        }
+
+        const processConfig: AcpProcessConfig = {
+          command: agentConfig.command,
+          args: agentConfig.args,
+          env: agentConfig.env,
+        };
+
+        this.processManager = new AcpProcessManager(processConfig);
+        this.processManager.start();
+
+        this.transport = new AcpStdioTransport(
+          this.processManager.stdin,
+          this.processManager.stdout,
+          () => this.handleProcessExit(),
+        );
+        this.transport.start();
+        break;
+      }
+
+      case 'http': {
+        if (!agentConfig.url) {
+          throw new Error(`ACP agent "${agentConfig.name}" has no URL configured`);
+        }
+
+        this.transport = new AcpHttpTransport({
+          url: agentConfig.url,
+          headers: agentConfig.headers,
+        });
+        this.transport.start();
+        break;
+      }
+
+      case 'websocket': {
+        if (!agentConfig.url) {
+          throw new Error(`ACP agent "${agentConfig.name}" has no URL configured`);
+        }
+
+        const wsTransport = new AcpWebSocketTransport({
+          url: agentConfig.url,
+          headers: agentConfig.headers,
+        });
+        await wsTransport.start();
+        this.transport = wsTransport;
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown transport type: ${agentConfig.transportType}`);
     }
-
-    // Convert to process config (only stdio uses process manager in MVP)
-    const processConfig: AcpProcessConfig = {
-      command: agentConfig.command ?? '',
-      args: agentConfig.args,
-      env: agentConfig.env,
-    };
-
-    this.processManager = new AcpProcessManager(processConfig);
-    this.processManager.start();
-
-    this.transport = new AcpStdioTransport(
-      this.processManager.stdin,
-      this.processManager.stdout,
-      () => this.handleProcessExit(),
-    );
-    this.transport.start();
 
     // Initialize handshake
     const initResult = await this.transport.request<AcpInitializeResult>('initialize', {

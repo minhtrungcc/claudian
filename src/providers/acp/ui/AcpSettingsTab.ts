@@ -73,7 +73,7 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
     transportSelect.createEl('option', { value: 'websocket', text: 'websocket' });
 
     // Command (for stdio)
-    const commandRow = newAgentForm.createDiv();
+    const commandRow = newAgentForm.createDiv({ cls: 'claudian-acp-stdio-row' });
     commandRow.style.display = 'flex';
     commandRow.style.gap = '0.5em';
     commandRow.style.alignItems = 'center';
@@ -81,6 +81,39 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
     const commandInput = new TextComponent(commandRow);
     commandInput.setPlaceholder('/usr/local/bin/my-agent');
     commandInput.inputEl.style.flex = '1';
+
+    // URL (for http/websocket)
+    const urlRow = newAgentForm.createDiv({ cls: 'claudian-acp-url-row' });
+    urlRow.style.display = 'none'; // Hidden by default
+    urlRow.style.display = 'flex';
+    urlRow.style.gap = '0.5em';
+    urlRow.style.alignItems = 'center';
+    urlRow.createSpan({ text: 'URL:' });
+    const urlInput = new TextComponent(urlRow);
+    urlInput.setPlaceholder('http://localhost:8080');
+    urlInput.inputEl.style.flex = '1';
+
+    // Headers (for http/websocket)
+    const headersRow = newAgentForm.createDiv({ cls: 'claudian-acp-headers-row' });
+    headersRow.style.display = 'none'; // Hidden by default
+    headersRow.style.display = 'flex';
+    headersRow.style.gap = '0.5em';
+    headersRow.style.alignItems = 'center';
+    headersRow.createSpan({ text: 'Headers (JSON):' });
+    const headersInput = new TextComponent(headersRow);
+    headersInput.setPlaceholder('{"Authorization": "Bearer token"}');
+    headersInput.inputEl.style.flex = '1';
+
+    // Show/hide fields based on transport type
+    const updateFormVisibility = (): void => {
+      const transport = transportSelect.value as AcpAgentConfig['transportType'];
+      commandRow.style.display = transport === 'stdio' ? 'flex' : 'none';
+      urlRow.style.display = (transport === 'http' || transport === 'websocket') ? 'flex' : 'none';
+      headersRow.style.display = (transport === 'http' || transport === 'websocket') ? 'flex' : 'none';
+    };
+
+    transportSelect.onchange = updateFormVisibility;
+    updateFormVisibility();
 
     // Add button
     const buttonRow = newAgentForm.createDiv();
@@ -92,13 +125,18 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
       idInput.setValue('');
       nameInput.setValue('');
       commandInput.setValue('');
+      urlInput.setValue('');
+      headersInput.setValue('');
       transportSelect.value = 'stdio';
+      updateFormVisibility();
     };
 
     addButton.onclick = async (): Promise<void> => {
       const id = idInput.getValue().trim();
       const name = nameInput.getValue().trim();
       const command = commandInput.getValue().trim();
+      const url = urlInput.getValue().trim();
+      const headersText = headersInput.getValue().trim();
       const transportType = transportSelect.value as AcpAgentConfig['transportType'];
 
       if (!id) {
@@ -112,6 +150,11 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
       }
 
       if (transportType === 'stdio' && !command) {
+        // TODO: show error
+        return;
+      }
+
+      if ((transportType === 'http' || transportType === 'websocket') && !url) {
         // TODO: show error
         return;
       }
@@ -131,6 +174,18 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
       if (transportType === 'stdio') {
         newAgent.command = command;
+      }
+
+      if (transportType === 'http' || transportType === 'websocket') {
+        newAgent.url = url;
+        if (headersText) {
+          try {
+            newAgent.headers = JSON.parse(headersText);
+          } catch {
+            // TODO: show error
+            return;
+          }
+        }
       }
 
       setAcpProviderSettings(settingsBag, {
@@ -199,6 +254,11 @@ function renderAgentsList(
 
     if (agent.transportType === 'stdio' && agent.command) {
       infoEl.createSpan({ text: `Command: ${agent.command}`, cls: 'claudian-acp-agent-command' });
+      infoEl.createEl('br');
+    }
+
+    if ((agent.transportType === 'http' || agent.transportType === 'websocket') && agent.url) {
+      infoEl.createSpan({ text: `URL: ${agent.url}`, cls: 'claudian-acp-agent-url' });
       infoEl.createEl('br');
     }
 
