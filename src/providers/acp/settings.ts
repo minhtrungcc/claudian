@@ -15,6 +15,8 @@ export interface AcpAgentConfig {
   headers?: Record<string, string>;
   // Common
   enabled: boolean;
+  // Built-in agent tracking
+  builtinType?: string;
 }
 
 export interface AcpProviderSettings {
@@ -65,4 +67,12 @@ export function setAcpProviderSettings(
 
 export function providerIdToKey(providerId: ProviderId): string {
   return providerId;
+}
+
+export function isBuiltinAgent(agent: AcpAgentConfig): boolean {
+  return typeof agent.builtinType === 'string' && agent.builtinType.length > 0;
+}
+
+export function getAgentBuiltinType(agent: AcpAgentConfig): string | null {
+  return agent.builtinType ?? null;
 }
