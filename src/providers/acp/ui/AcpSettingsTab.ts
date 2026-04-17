@@ -1,9 +1,9 @@
-import { Setting, TextComponent } from 'obsidian';
+import { Setting, TextComponent, Notice } from 'obsidian';
 
 import type { ProviderSettingsTabRenderer, ProviderSettingsTabRendererContext } from '../../../core/providers/types';
-import { type AcpAgentConfig, getAcpProviderSettings, setAcpProviderSettings } from '../settings';
-import { getBuiltinAgentConfig, listBuiltinAgentTypes, type BuiltinAgentType } from '../cli/builtinAgentConfigs';
+import { getBuiltinAgentConfig, listBuiltinAgentTypes } from '../cli/builtinAgentConfigs';
 import { findGeminiBinaryPath } from '../cli/GeminiCliLocator';
+import { type AcpAgentConfig, getAcpProviderSettings, setAcpProviderSettings } from '../settings';
 
 function renderQuickAddButtons(
   container: HTMLElement,
@@ -39,26 +39,32 @@ function renderQuickAddButtons(
       text: agentConfig.name,
       cls: isAlreadyAdded ? '' : 'mod-cta',
     });
-    button.style.marginRight = '0.5em';
     button.disabled = isAlreadyAdded;
 
     if (!isAlreadyAdded) {
       button.onclick = async (): Promise<void> => {
-        // Try to find the binary
-        const binaryPath = findGeminiBinaryPath();
-        const finalConfig = getBuiltinAgentConfig(agentType, binaryPath ?? undefined);
+        try {
+          // Try to find the binary
+          const binaryPath = findGeminiBinaryPath();
+          const finalConfig = getBuiltinAgentConfig(agentType, binaryPath ?? undefined);
 
-        setAcpProviderSettings(settingsBag, {
-          agents: [...acpSettings.agents, finalConfig],
-        });
+          setAcpProviderSettings(settingsBag, {
+            agents: [...acpSettings.agents, finalConfig],
+          });
 
-        await context.plugin.saveSettings();
-        context.refreshModelSelectors();
+          await context.plugin.saveSettings();
+          context.refreshModelSelectors();
 
-        // Re-render
-        const updatedSettings = getAcpProviderSettings(settingsBag);
-        renderAgentsList(agentsList, updatedSettings.agents, settingsBag, context, updatedSettings);
-        renderQuickAddButtons(container, settingsBag, context, updatedSettings, agentsList);
+          // Re-render
+          const updatedSettings = getAcpProviderSettings(settingsBag);
+          renderAgentsList(agentsList, updatedSettings.agents, settingsBag, context, updatedSettings);
+          renderQuickAddButtons(container, settingsBag, context, updatedSettings, agentsList);
+
+          new Notice(`Added ${agentConfig.name} agent successfully`);
+        } catch (error) {
+          new Notice(`Failed to add agent: ${error}`, 5000);
+          console.error('Failed to add built-in agent:', error);
+        }
       };
     }
   }
