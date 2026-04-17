@@ -1,7 +1,68 @@
-import { Setting, TextAreaComponent, TextComponent } from 'obsidian';
+import { Setting, TextComponent } from 'obsidian';
+
 import type { ProviderSettingsTabRenderer, ProviderSettingsTabRendererContext } from '../../../core/providers/types';
-import { t } from '../../../i18n/i18n';
-import { getAcpProviderSettings, setAcpProviderSettings, type AcpAgentConfig } from '../settings';
+import { type AcpAgentConfig, getAcpProviderSettings, setAcpProviderSettings } from '../settings';
+import { getBuiltinAgentConfig, listBuiltinAgentTypes, type BuiltinAgentType } from '../cli/builtinAgentConfigs';
+import { findGeminiBinaryPath } from '../cli/GeminiCliLocator';
+
+function renderQuickAddButtons(
+  container: HTMLElement,
+  settingsBag: Record<string, unknown>,
+  context: ProviderSettingsTabRendererContext,
+  acpSettings: ReturnType<typeof getAcpProviderSettings>,
+  agentsList: HTMLElement,
+): void {
+  container.empty();
+
+  const quickAddDesc = container.createEl('div', {
+    cls: 'claudian-acp-quick-add-desc',
+  });
+  quickAddDesc.createSpan({ text: 'Add pre-configured agents with one click.' });
+  quickAddDesc.createEl('br');
+  quickAddDesc.createSpan({
+    text: 'The agent CLI will be auto-detected in your PATH.',
+    cls: 'claudian-acp-quick-add-subdesc',
+  });
+
+  const quickAddButtons = container.createDiv({ cls: 'claudian-acp-quick-add-buttons' });
+  quickAddButtons.style.display = 'flex';
+  quickAddButtons.style.gap = '0.5em';
+  quickAddButtons.style.flexWrap = 'wrap';
+  quickAddButtons.style.marginTop = '0.5em';
+
+  const builtinTypes = listBuiltinAgentTypes();
+  for (const agentType of builtinTypes) {
+    const agentConfig = getBuiltinAgentConfig(agentType);
+    const isAlreadyAdded = acpSettings.agents.some(a => a.builtinType === agentType);
+
+    const button = quickAddButtons.createEl('button', {
+      text: agentConfig.name,
+      cls: isAlreadyAdded ? '' : 'mod-cta',
+    });
+    button.style.marginRight = '0.5em';
+    button.disabled = isAlreadyAdded;
+
+    if (!isAlreadyAdded) {
+      button.onclick = async (): Promise<void> => {
+        // Try to find the binary
+        const binaryPath = findGeminiBinaryPath();
+        const finalConfig = getBuiltinAgentConfig(agentType, binaryPath ?? undefined);
+
+        setAcpProviderSettings(settingsBag, {
+          agents: [...acpSettings.agents, finalConfig],
+        });
+
+        await context.plugin.saveSettings();
+        context.refreshModelSelectors();
+
+        // Re-render
+        const updatedSettings = getAcpProviderSettings(settingsBag);
+        renderAgentsList(agentsList, updatedSettings.agents, settingsBag, context, updatedSettings);
+        renderQuickAddButtons(container, settingsBag, context, updatedSettings, agentsList);
+      };
+    }
+  }
+}
 
 export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
   render(container, context) {
@@ -30,6 +91,12 @@ export const acpSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
     const agentsList = agentsSection.createDiv({ cls: 'claudian-acp-agents-list' });
     renderAgentsList(agentsList, acpSettings.agents, settingsBag, context, acpSettings);
+
+    // --- Quick Add Built-in Agents ---
+    const quickAddSection = container.createDiv({ cls: 'claudian-acp-quick-add-section' });
+    new Setting(quickAddSection).setName('Quick add built-in agents').setHeading();
+    const quickAddButtonsContainer = quickAddSection.createDiv({ cls: 'claudian-acp-quick-add-buttons' });
+    renderQuickAddButtons(quickAddButtonsContainer, settingsBag, context, acpSettings, agentsList);
 
     // --- Add New Agent ---
 
