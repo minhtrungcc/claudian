@@ -39,6 +39,20 @@ Future phases will add:
 - Agent capability discovery
 - Session persistence
 
+## Built-in Agents
+
+The ACP provider includes pre-configured agent templates for popular CLI tools:
+
+### Gemini CLI
+
+- **Type**: `gemini-cli`
+- **Command**: `gemini app-server`
+- **Transport**: stdio
+- **Discovery**: Auto-detected in PATH or via custom path
+- **WSL Variant**: `gemini-cli-wsl` with `GEMINI_USE_WSL=1` environment variable
+
+Built-in agents can be added via the "Quick add built-in agents" section in settings.
+
 ## Non-Obvious Behaviors
 
 ### Agent Configuration
@@ -75,3 +89,6 @@ ACP's `user/requestInput` uses question IDs. Claudian's `AskUserQuestionCallback
 - Tool result interpretation is minimal—ACP doesn't have the same async agent pattern as Claude
 - The settings reconciler only invalidates conversations when the configured agent is removed
 - HTTP/WebSocket transport is stubbed for future implementation
+- Built-in agents are templates - the CLI binary path is resolved at runtime from PATH or custom configuration
+- If the Gemini CLI binary is not found, the agent will fail to start with a "command not found" error
+- The WSL variant requires WSL to be properly configured on Windows
