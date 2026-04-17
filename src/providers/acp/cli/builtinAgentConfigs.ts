@@ -48,10 +48,19 @@ export function getBuiltinAgentConfig(
 
   return {
     id: type,
+    builtinType: type,
     ...factory.create(customPath),
   };
 }
 
 export function isBuiltinAgentType(value: string): value is BuiltinAgentType {
   return BUILTIN_AGENT_TYPES.includes(value as BuiltinAgentType);
+}
+
+export function isBuiltinAgent(agent: AcpAgentConfig): boolean {
+  return typeof agent.builtinType === 'string' && agent.builtinType.length > 0;
+}
+
+export function getAgentBuiltinType(agent: AcpAgentConfig): string | null {
+  return agent.builtinType ?? null;
 }

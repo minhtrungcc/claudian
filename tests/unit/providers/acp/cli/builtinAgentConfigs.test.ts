@@ -1,4 +1,4 @@
-import { getBuiltinAgentConfig, listBuiltinAgentTypes } from '@/providers/acp/cli/builtinAgentConfigs';
+import { isBuiltinAgent, getAgentBuiltinType, getBuiltinAgentConfig, listBuiltinAgentTypes } from '@/providers/acp/cli/builtinAgentConfigs';
 import type { AcpAgentConfig } from '@/providers/acp/settings';
 
 describe('builtinAgentConfigs', () => {
@@ -59,5 +59,56 @@ describe('builtinAgentConfigs', () => {
       expect(['stdio', 'http', 'websocket']).toContain(agentConfig.transportType);
       expect(typeof agentConfig.enabled).toBe('boolean');
     });
+
+    it('returns valid AcpAgentConfig shape', () => {
+      const config = getBuiltinAgentConfig('gemini-cli');
+      const agentConfig: AcpAgentConfig = config;
+      expect(typeof agentConfig.id).toBe('string');
+      expect(typeof agentConfig.name).toBe('string');
+      expect(['stdio', 'http', 'websocket']).toContain(agentConfig.transportType);
+      expect(typeof agentConfig.enabled).toBe('boolean');
+    });
+  });
+});
+
+describe('isBuiltinAgent', () => {
+  it('returns true for built-in agent with builtinType', () => {
+    const config = getBuiltinAgentConfig('gemini-cli');
+    expect(isBuiltinAgent(config)).toBe(true);
+  });
+
+  it('returns false for agent without builtinType', () => {
+    const manualAgent: AcpAgentConfig = {
+      id: 'manual',
+      name: 'Manual Agent',
+      transportType: 'stdio',
+      command: 'custom',
+      enabled: true,
+    };
+    expect(isBuiltinAgent(manualAgent)).toBe(false);
+  });
+
+  it('returns false for empty string builtinType', () => {
+    const config = getBuiltinAgentConfig('gemini-cli');
+    config.builtinType = '';
+    expect(isBuiltinAgent(config)).toBe(false);
+  });
+});
+
+describe('getAgentBuiltinType', () => {
+  it('returns builtinType for built-in agents', () => {
+    const config = getBuiltinAgentConfig('gemini-cli');
+    expect(getAgentBuiltinType(config)).toBe('gemini-cli');
+  });
+
+  it('returns null for agents without builtinType', () => {
+    const manualAgent: AcpAgentConfig = {
+      id: 'manual',
+      name: 'Manual Agent',
+      transportType: 'stdio',
+      command: 'custom',
+      enabled: true,
+    };
+    expect(getAgentBuiltinType(manualAgent)).toBeNull();
   });
 });
