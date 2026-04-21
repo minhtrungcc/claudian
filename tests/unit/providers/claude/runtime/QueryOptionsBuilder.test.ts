@@ -137,10 +137,10 @@ describe('QueryOptionsBuilder', () => {
       expect(QueryOptionsBuilder.needsRestart(currentConfig, newConfig)).toBe(true);
     });
 
-    it('returns true when effortLevel changes', () => {
+    it('returns false when only effortLevel changes', () => {
       const currentConfig = createMockPersistentQueryConfig({ effortLevel: 'high' });
       const newConfig = { ...currentConfig, effortLevel: 'low' as const };
-      expect(QueryOptionsBuilder.needsRestart(currentConfig, newConfig)).toBe(true);
+      expect(QueryOptionsBuilder.needsRestart(currentConfig, newConfig)).toBe(false);
     });
 
     it('returns false when only model changes (dynamic update)', () => {
@@ -212,7 +212,7 @@ describe('QueryOptionsBuilder', () => {
 
     it('includes thinking tokens when budget is set', () => {
       const ctx = createMockContext({
-        settings: createMockSettings({ thinkingBudget: 'high' }),
+        settings: createMockSettings({ model: 'custom-model', thinkingBudget: 'high' }),
       });
       const config = QueryOptionsBuilder.buildPersistentQueryConfig(ctx);
 
@@ -226,6 +226,25 @@ describe('QueryOptionsBuilder', () => {
       const config = QueryOptionsBuilder.buildPersistentQueryConfig(ctx);
 
       expect(config.effortLevel).toBe('max');
+    });
+
+    it('clears thinkingTokens for adaptive models even when a budget is configured', () => {
+      const ctx = createMockContext({
+        settings: createMockSettings({ model: 'sonnet', thinkingBudget: 'high', effortLevel: 'max' }),
+      });
+      const config = QueryOptionsBuilder.buildPersistentQueryConfig(ctx);
+
+      expect(config.thinkingTokens).toBeNull();
+      expect(config.effortLevel).toBe('max');
+    });
+
+    it('normalizes unsupported xhigh effort for adaptive models', () => {
+      const ctx = createMockContext({
+        settings: createMockSettings({ model: 'sonnet', effortLevel: 'xhigh' }),
+      });
+      const config = QueryOptionsBuilder.buildPersistentQueryConfig(ctx);
+
+      expect(config.effortLevel).toBe('high');
     });
 
     it('sets effortLevel to null for custom model', () => {
@@ -358,6 +377,20 @@ describe('QueryOptionsBuilder', () => {
       expect(options.thinking).toEqual({ type: 'adaptive' });
       expect(options.effort).toBe('max');
       expect(options.maxThinkingTokens).toBeUndefined();
+    });
+
+    it('clamps unsupported xhigh effort before building adaptive options', () => {
+      const ctx = {
+        ...createMockContext({
+          settings: createMockSettings({ model: 'sonnet', effortLevel: 'xhigh' }),
+        }),
+        abortController: new AbortController(),
+        hooks: {},
+      };
+      const options = QueryOptionsBuilder.buildPersistentQueryOptions(ctx);
+
+      expect(options.thinking).toEqual({ type: 'adaptive' });
+      expect(options.effort).toBe('high');
     });
 
     it('sets thinking tokens for custom models', () => {

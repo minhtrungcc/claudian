@@ -17,9 +17,8 @@ import {
   getClaudeProviderSettings,
 } from '../settings';
 import {
-  type EffortLevel,
-  isAdaptiveThinkingModel,
-  THINKING_BUDGETS,
+  resolveAdaptiveEffortLevel,
+  resolveThinkingTokens,
 } from '../types/models';
 import { createCustomSpawnFunction } from './customSpawn';
 import {
@@ -82,9 +81,6 @@ export class QueryOptionsBuilder {
 
     if (currentConfig.enableChrome !== newConfig.enableChrome) return true;
 
-    // Effort level requires restart (no setEffort() on persistent query)
-    if (currentConfig.effortLevel !== newConfig.effortLevel) return true;
-
     // External context paths require restart (additionalDirectories can't be updated dynamically)
     if (QueryOptionsBuilder.pathsChanged(currentConfig.externalContextPaths, newConfig.externalContextPaths)) {
       return true;
@@ -105,9 +101,6 @@ export class QueryOptionsBuilder {
       userName: ctx.settings.userName,
     };
 
-    const budgetSetting = ctx.settings.thinkingBudget;
-    const budgetConfig = THINKING_BUDGETS.find(b => b.value === budgetSetting);
-    const thinkingTokens = budgetConfig?.tokens ?? null;
     const sdkPermissionMode = QueryOptionsBuilder.resolveClaudeSdkPermissionMode(
       ctx.settings.permissionMode,
       claudeSettings.safeMode,
@@ -118,8 +111,8 @@ export class QueryOptionsBuilder {
 
     return {
       model: ctx.settings.model,
-      thinkingTokens: thinkingTokens && thinkingTokens > 0 ? thinkingTokens : null,
-      effortLevel: isAdaptiveThinkingModel(ctx.settings.model) ? ctx.settings.effortLevel as EffortLevel : null,
+      thinkingTokens: resolveThinkingTokens(ctx.settings.model, ctx.settings.thinkingBudget),
+      effortLevel: resolveAdaptiveEffortLevel(ctx.settings.model, ctx.settings.effortLevel),
       permissionMode: ctx.settings.permissionMode,
       sdkPermissionMode,
       systemPromptKey: computeSystemPromptKey(systemPromptSettings),
@@ -293,14 +286,16 @@ export class QueryOptionsBuilder {
     settings: ClaudianSettings,
     model: string
   ): void {
-    if (isAdaptiveThinkingModel(model)) {
+    const effortLevel = resolveAdaptiveEffortLevel(model, settings.effortLevel);
+    if (effortLevel !== null) {
       options.thinking = { type: 'adaptive' };
-      options.effort = settings.effortLevel as EffortLevel;
-    } else {
-      const budgetConfig = THINKING_BUDGETS.find(b => b.value === settings.thinkingBudget);
-      if (budgetConfig && budgetConfig.tokens > 0) {
-        options.maxThinkingTokens = budgetConfig.tokens;
-      }
+      options.effort = effortLevel;
+      return;
+    }
+
+    const thinkingTokens = resolveThinkingTokens(model, settings.thinkingBudget);
+    if (thinkingTokens !== null) {
+      options.maxThinkingTokens = thinkingTokens;
     }
   }
 

@@ -10,7 +10,10 @@ import type {
   ChatRuntimeQueryOptions,
 } from '../../../core/runtime/types';
 import type { ClaudianSettings, PermissionMode } from '../../../core/types/settings';
-import { isAdaptiveThinkingModel, THINKING_BUDGETS } from '../types/models';
+import {
+  resolveAdaptiveEffortLevel,
+  resolveThinkingTokens,
+} from '../types/models';
 import type {
   ClosePersistentQueryOptions,
   PersistentQueryConfig,
@@ -74,20 +77,42 @@ export async function applyClaudeDynamicUpdates(
     }
   }
 
-  if (!isAdaptiveThinkingModel(selectedModel)) {
-    const budgetConfig = THINKING_BUDGETS.find(b => b.value === settings.thinkingBudget);
-    const thinkingTokens = budgetConfig?.tokens ?? null;
-    const currentThinking = deps.getCurrentConfig()?.thinkingTokens ?? null;
-    if (thinkingTokens !== currentThinking) {
+  const thinkingTokens = resolveThinkingTokens(selectedModel, settings.thinkingBudget);
+  const currentThinking = deps.getCurrentConfig()?.thinkingTokens ?? null;
+  if (thinkingTokens !== currentThinking) {
+    try {
+      await persistentQuery.setMaxThinkingTokens(thinkingTokens);
+      deps.mutateCurrentConfig(config => {
+        config.thinkingTokens = thinkingTokens;
+      });
+    } catch {
+      deps.notifyFailure('Failed to update thinking budget');
+    }
+  } else {
+    deps.mutateCurrentConfig(config => {
+      config.thinkingTokens = thinkingTokens;
+    });
+  }
+
+  const effortLevel = resolveAdaptiveEffortLevel(selectedModel, settings.effortLevel);
+  if (effortLevel !== null) {
+    const currentEffort = deps.getCurrentConfig()?.effortLevel ?? null;
+    if (effortLevel !== currentEffort) {
       try {
-        await persistentQuery.setMaxThinkingTokens(thinkingTokens);
+        // SDK runtime accepts `max`, but the current type definition for
+        // Settings.effortLevel has not caught up yet.
+        await persistentQuery.applyFlagSettings({ effortLevel } as unknown as Parameters<Query['applyFlagSettings']>[0]);
         deps.mutateCurrentConfig(config => {
-          config.thinkingTokens = thinkingTokens;
+          config.effortLevel = effortLevel;
         });
       } catch {
-        deps.notifyFailure('Failed to update thinking budget');
+        deps.notifyFailure('Failed to update effort level');
       }
     }
+  } else {
+    deps.mutateCurrentConfig(config => {
+      config.effortLevel = null;
+    });
   }
 
   const configBeforePermissionUpdate = deps.getCurrentConfig();
